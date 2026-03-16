@@ -147,6 +147,8 @@ def run(input_path, output_path, buffer):
         writer.writerows(rows)
 
     print(f"\nOutput written to: {output_path}")
+    print(f"\nGoogle Sheets formula for Truth column (paste in C2 and drag down):")
+    print(f'  =IF(AND(A2<>"",B2<>""),"TP",IF(A2<>"","Missing",IF(B2<>"","Phantom","")))')
 
 
 def main():
