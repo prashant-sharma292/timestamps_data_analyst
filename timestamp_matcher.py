@@ -60,26 +60,30 @@ def read_input(path):
 
 def match_timestamps(gt_times, model_times, buffer):
     """
-    Simple first-match: walk GT in order, match to first available model within buffer.
+    Global closest-match: build all candidate pairs, then assign by smallest difference first.
     """
+    from bisect import bisect_left, bisect_right
+
+    # Build all candidate (diff, gi, mi) pairs
+    candidates = []
+    for gi, gt in enumerate(gt_times):
+        lo = bisect_left(model_times, gt - buffer)
+        hi = bisect_right(model_times, gt + buffer)
+        for mi in range(lo, hi):
+            candidates.append((abs(gt - model_times[mi]), gi, mi))
+
+    # Assign closest pairs first
+    candidates.sort()
+    used_gt = set()
     used_model = set()
     tp_pairs = []
-    model_ptr = 0
+    for diff, gi, mi in candidates:
+        if gi not in used_gt and mi not in used_model:
+            tp_pairs.append((gi, mi))
+            used_gt.add(gi)
+            used_model.add(mi)
 
-    for gi, gt in enumerate(gt_times):
-        while model_ptr < len(model_times) and model_times[model_ptr] < gt - buffer:
-            model_ptr += 1
-
-        for mi in range(model_ptr, len(model_times)):
-            if model_times[mi] > gt + buffer:
-                break
-            if mi not in used_model:
-                tp_pairs.append((gi, mi))
-                used_model.add(mi)
-                break
-
-    matched_gt = {gi for gi, _ in tp_pairs}
-    missing = [gi for gi in range(len(gt_times)) if gi not in matched_gt]
+    missing = [gi for gi in range(len(gt_times)) if gi not in used_gt]
     phantoms = [mi for mi in range(len(model_times)) if mi not in used_model]
 
     return tp_pairs, phantoms, missing
@@ -98,6 +102,8 @@ def run(input_path, output_path, buffer):
     n_phantom = len(phantoms)
     n_missing = len(missing)
     print(f"Results:")
+    print(f"  raw_entries_GT:      {len(gt_times)}")
+    print(f"  raw_entries_model:   {len(model_times)}")
     print(f"  TP (True Positive):  {n_tp}")
     print(f"  Phantom (FP):        {n_phantom}")
     print(f"  Missing (FN):        {n_missing}")
@@ -133,9 +139,12 @@ def run(input_path, output_path, buffer):
         })
 
     def sort_key(row):
+        times = []
         if row["GT"]:
-            return (parse_time(row["GT"]), 0)
-        return (parse_time(row["model"]), 1)
+            times.append(parse_time(row["GT"]))
+        if row["model"]:
+            times.append(parse_time(row["model"]))
+        return min(times)
 
     rows.sort(key=sort_key)
 
