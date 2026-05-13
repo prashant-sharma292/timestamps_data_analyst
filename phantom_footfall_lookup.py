@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Find which phantom timestamps from a matcher result are present in footfall entries.
+Find which final model output timestamps came from Phantom matcher rows.
 
 The footfall export stores event time in UUIDv7-style entry_tracker_id values. This
-module decodes those IDs, rounds to the nearest second, and compares them with
-Phantom rows from result2.tsv.
+module decodes those IDs, rounds to the nearest second, and compares each final
+output timestamp with the model column in timestamp_matcher_results.tsv.
 """
 
 import argparse
@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 DEFAULT_ALL_TIMESTAMPS = "all_timestamps.tsv"
 DEFAULT_RESULT = "timestamp_matcher_results.tsv"
-DEFAULT_OUTPUT = "phantom_footfall_matches.tsv"
+DEFAULT_OUTPUT = "final_model_phantom_lookup.tsv"
 DEFAULT_TIMEZONE = "Asia/Kolkata"
 DEFAULT_TOLERANCE = 1
 
@@ -83,57 +83,84 @@ def read_footfall_entries(path, timezone_name=DEFAULT_TIMEZONE):
     return entries, fieldnames
 
 
-def read_phantom_timestamps(path):
-    rows, _fieldnames = read_table(path)
-    phantoms = []
+def read_matcher_model_entries(path):
+    rows, fieldnames = read_table(path)
+    if "model" not in fieldnames and "Model" not in fieldnames:
+        raise ValueError(f"{path} must contain a model column")
+
+    entries = []
     for row in rows:
-        truth = row.get("Truth", "").strip().lower()
         timestamp = (row.get("model") or row.get("Model") or row.get("timestamp") or "").strip()
-        if truth == "phantom" and timestamp:
-            phantoms.append(timestamp)
-    return phantoms
+        if not timestamp:
+            continue
+        entries.append((parse_time_to_seconds(timestamp), timestamp, row))
+    entries.sort(key=lambda item: item[0])
+    return entries
 
 
-def find_matches_for_timestamp(target_seconds, footfall_entries, tolerance):
-    seconds_only = [seconds for seconds, _row in footfall_entries]
+def find_matches_for_timestamp(target_seconds, matcher_entries, tolerance):
+    seconds_only = [seconds for seconds, _timestamp, _row in matcher_entries]
     left = bisect_left(seconds_only, target_seconds - tolerance)
     right = bisect_right(seconds_only, target_seconds + tolerance)
-    return footfall_entries[left:right]
+    return matcher_entries[left:right]
 
 
-def build_output_rows(footfall_entries, footfall_fieldnames, phantom_timestamps, tolerance):
+def choose_closest_match(target_seconds, matcher_entries):
+    return min(
+        matcher_entries,
+        key=lambda item: (abs(item[0] - target_seconds), item[1]),
+    )
+
+
+def build_output_rows(footfall_entries, footfall_fieldnames, matcher_entries, tolerance):
     output_rows = []
-    for timestamp in phantom_timestamps:
-        target_seconds = parse_time_to_seconds(timestamp)
-        matches = find_matches_for_timestamp(target_seconds, footfall_entries, tolerance)
+    for footfall_seconds, footfall_row in footfall_entries:
+        final_timestamp = fmt_time(footfall_seconds)
+        matches = find_matches_for_timestamp(footfall_seconds, matcher_entries, tolerance)
 
         if not matches:
             output_rows.append({
-                "phantom_timestamp": timestamp,
-                "matched": "FALSE",
-                "footfall_timestamp": "",
+                "final_output_timestamp": final_timestamp,
+                "matched_model": "FALSE",
+                "matched_model_timestamp": "",
+                "matcher_truth": "",
+                "is_phantom": "FALSE",
                 "delta_seconds": "",
-                **{field: "" for field in footfall_fieldnames},
+                "matcher_gt": "",
+                "matcher_offset": "",
+                **{field: footfall_row.get(field, "") for field in footfall_fieldnames},
             })
             continue
 
-        for footfall_seconds, footfall_row in matches:
-            output_rows.append({
-                "phantom_timestamp": timestamp,
-                "matched": "TRUE",
-                "footfall_timestamp": fmt_time(footfall_seconds),
-                "delta_seconds": str(footfall_seconds - target_seconds),
-                **{field: footfall_row.get(field, "") for field in footfall_fieldnames},
-            })
+        matched_seconds, matched_timestamp, matcher_row = choose_closest_match(
+            footfall_seconds,
+            matches,
+        )
+        truth = matcher_row.get("Truth", "").strip()
+        output_rows.append({
+            "final_output_timestamp": final_timestamp,
+            "matched_model": "TRUE",
+            "matched_model_timestamp": matched_timestamp,
+            "matcher_truth": truth,
+            "is_phantom": "TRUE" if truth.lower() == "phantom" else "FALSE",
+            "delta_seconds": str(footfall_seconds - matched_seconds),
+            "matcher_gt": matcher_row.get("GT", ""),
+            "matcher_offset": matcher_row.get("Offset", ""),
+            **{field: footfall_row.get(field, "") for field in footfall_fieldnames},
+        })
     return output_rows
 
 
 def write_output(path, rows, footfall_fieldnames):
     fieldnames = [
-        "phantom_timestamp",
-        "matched",
-        "footfall_timestamp",
+        "final_output_timestamp",
+        "matched_model",
+        "matched_model_timestamp",
+        "matcher_truth",
+        "is_phantom",
         "delta_seconds",
+        "matcher_gt",
+        "matcher_offset",
         *footfall_fieldnames,
     ]
     with open(path, "w", newline="") as f:
@@ -142,7 +169,7 @@ def write_output(path, rows, footfall_fieldnames):
         writer.writerows(rows)
 
 
-def find_phantom_footfall_matches(
+def find_final_output_phantoms(
     all_timestamps_path=DEFAULT_ALL_TIMESTAMPS,
     result_path=DEFAULT_RESULT,
     output_path=None,
@@ -153,11 +180,11 @@ def find_phantom_footfall_matches(
         all_timestamps_path,
         timezone_name=timezone_name,
     )
-    phantom_timestamps = read_phantom_timestamps(result_path)
+    matcher_entries = read_matcher_model_entries(result_path)
     rows = build_output_rows(
         footfall_entries,
         footfall_fieldnames,
-        phantom_timestamps,
+        matcher_entries,
         tolerance,
     )
     if output_path:
@@ -165,9 +192,12 @@ def find_phantom_footfall_matches(
     return rows
 
 
+find_phantom_footfall_matches = find_final_output_phantoms
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Check which Phantom timestamps are present in all_timestamps.tsv"
+        description="Check which final model output timestamps came from Phantom rows"
     )
     parser.add_argument(
         "--all-timestamps",
@@ -191,7 +221,7 @@ def main():
         type=int,
         default=DEFAULT_TOLERANCE,
         help=(
-            "Seconds around each Phantom timestamp to accept as present "
+            "Seconds around each final output timestamp to match against model rows "
             f"(default: {DEFAULT_TOLERANCE})"
         ),
     )
@@ -202,21 +232,20 @@ def main():
     )
     args = parser.parse_args()
 
-    rows = find_phantom_footfall_matches(
+    rows = find_final_output_phantoms(
         all_timestamps_path=Path(args.all_timestamps),
         result_path=Path(args.result),
         output_path=Path(args.output),
         tolerance=args.tolerance,
         timezone_name=args.timezone,
     )
-    matched_rows = sum(1 for row in rows if row["matched"] == "TRUE")
-    matched_timestamps = {
-        row["phantom_timestamp"] for row in rows if row["matched"] == "TRUE"
-    }
-    unmatched = sum(1 for row in rows if row["matched"] == "FALSE")
-    print(f"Matched phantom timestamps: {len(matched_timestamps)}")
-    print(f"Footfall match rows: {matched_rows}")
-    print(f"Unmatched phantom timestamps: {unmatched}")
+    matched_model_rows = sum(1 for row in rows if row["matched_model"] == "TRUE")
+    phantom_final_rows = sum(1 for row in rows if row["is_phantom"] == "TRUE")
+    unmatched_model_rows = sum(1 for row in rows if row["matched_model"] == "FALSE")
+    print(f"Final output entries: {len(rows)}")
+    print(f"Matched to model timestamps: {matched_model_rows}")
+    print(f"Final output entries marked Phantom: {phantom_final_rows}")
+    print(f"Final output entries without model match: {unmatched_model_rows}")
     print(f"Output written to: {args.output}")
 
 
