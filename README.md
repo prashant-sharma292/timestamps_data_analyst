@@ -53,21 +53,31 @@ The result CSV has four columns:
 
 Use `phantom_footfall_lookup.py` to check which raw model timestamps marked `Phantom` are still present in the final model output.
 
-Recommended input names:
+Create one input file:
 
-- `all_timestamps.tsv`: footfall export with `entry_tracker_id`
-- `timestamp_matcher_results.tsv`: matcher output containing the full `model` column and `Truth` labels
+- `phantom_final_timestamps.tsv`: two-column TSV containing Phantom timestamps and final output timestamps
+
+```tsv
+phantom_timestamp	final_output_timestamp
+12:34:48	12:34:45
+12:57:22	12:57:19
+13:02:21	
+```
+
+Rows do not need to be paired. The script reads all values from both columns independently, then matches each Phantom timestamp to the closest available final output timestamp within tolerance.
+
+Run:
 
 ```bash
-uv run phantom_footfall_lookup.py
+uv run phantom_footfall_lookup.py phantom_final_timestamps.tsv
 ```
 
 By default this writes `phantoms_in_final_output.tsv` and uses a 5-second tolerance.
 The output has one row per `Phantom` timestamp. `present_in_final_output = TRUE`
-means that raw phantom timestamp matched a decoded entry from `all_timestamps.tsv`.
+means that raw Phantom timestamp matched a final output timestamp.
 
 Override `--tolerance` for wider near matches:
 
 ```bash
-uv run phantom_footfall_lookup.py --tolerance 10 -o phantoms_in_final_output_10s.tsv
+uv run phantom_footfall_lookup.py phantom_final_timestamps.tsv --tolerance 10 -o phantoms_in_final_output_10s.tsv
 ```
