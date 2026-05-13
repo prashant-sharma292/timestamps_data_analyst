@@ -48,3 +48,23 @@ The result CSV has four columns:
 | model | Model timestamp (empty for Missing) |
 | Truth | Classification: `TP`, `Missing`, or `Phantom` |
 | Offset | Time difference for TP matches (model - GT) |
+
+## Phantom footfall lookup
+
+Use `phantom_footfall_lookup.py` to check whether `Phantom` timestamps from a matcher result are present in the footfall export.
+
+Recommended input names:
+
+- `all_timestamps.tsv`: footfall export with `entry_tracker_id`
+- `timestamp_matcher_results.tsv`: matcher output containing `Truth = Phantom` rows
+
+```bash
+python3 phantom_footfall_lookup.py
+```
+
+By default this writes `phantom_footfall_matches.tsv` and uses a 1-second tolerance.
+Override `--tolerance` for wider near matches:
+
+```bash
+python3 phantom_footfall_lookup.py --tolerance 5 -o phantom_footfall_matches_tolerance_5s.tsv
+```

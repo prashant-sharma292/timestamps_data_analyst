@@ -209,3 +209,8 @@ __marimo__/
 
 *.tsv
 *.csv
+
+CLAUDE.md
+AGENTS.md
+
+tests/
