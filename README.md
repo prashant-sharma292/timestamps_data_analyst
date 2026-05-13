@@ -59,12 +59,12 @@ Recommended input names:
 - `timestamp_matcher_results.tsv`: matcher output containing `Truth = Phantom` rows
 
 ```bash
-python3 phantom_footfall_lookup.py
+uv run phantom_footfall_lookup.py
 ```
 
 By default this writes `phantom_footfall_matches.tsv` and uses a 1-second tolerance.
 Override `--tolerance` for wider near matches:
 
 ```bash
-python3 phantom_footfall_lookup.py --tolerance 5 -o phantom_footfall_matches_tolerance_5s.tsv
+uv run phantom_footfall_lookup.py --tolerance 5 -o phantom_footfall_matches_tolerance_5s.tsv
 ```
