@@ -60,31 +60,30 @@ def read_input(path):
 
 def match_timestamps(gt_times, model_times, buffer):
     """
-    Global closest-match: build all candidate pairs, then assign by smallest difference first.
+    Order-preserving sequential match: walk both sorted lists top-to-bottom.
+    Pair the current GT and model if within tolerance; otherwise advance past
+    the earlier of the two (it stays unmatched), keeping the sequence aligned.
     """
-    from bisect import bisect_left, bisect_right
-
-    # Build all candidate (diff, gi, mi) pairs
-    candidates = []
-    for gi, gt in enumerate(gt_times):
-        lo = bisect_left(model_times, gt - buffer)
-        hi = bisect_right(model_times, gt + buffer)
-        for mi in range(lo, hi):
-            candidates.append((abs(gt - model_times[mi]), gi, mi))
-
-    # Assign closest pairs first
-    candidates.sort()
-    used_gt = set()
-    used_model = set()
     tp_pairs = []
-    for diff, gi, mi in candidates:
-        if gi not in used_gt and mi not in used_model:
+    missing = []
+    phantoms = []
+    gi = mi = 0
+    while gi < len(gt_times) and mi < len(model_times):
+        diff = model_times[mi] - gt_times[gi]
+        if abs(diff) <= buffer:
             tp_pairs.append((gi, mi))
-            used_gt.add(gi)
-            used_model.add(mi)
+            gi += 1
+            mi += 1
+        elif gt_times[gi] < model_times[mi]:
+            missing.append(gi)  # GT is the earlier one, too far to match
+            gi += 1
+        else:
+            phantoms.append(mi)  # model is the earlier one, too far to match
+            mi += 1
 
-    missing = [gi for gi in range(len(gt_times)) if gi not in used_gt]
-    phantoms = [mi for mi in range(len(model_times)) if mi not in used_model]
+    # Once one list is exhausted, everything left over is unmatched
+    missing.extend(range(gi, len(gt_times)))
+    phantoms.extend(range(mi, len(model_times)))
 
     return tp_pairs, phantoms, missing
 
